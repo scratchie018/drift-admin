@@ -398,7 +398,7 @@ tr.me td{color:var(--sodium);font-weight:700}
         <div class="netstatus" id="netStatus" role="status">Connecting…</div>
       </div>
       <p class="ver">Car: <a href="https://sketchfab.com/3d-models/low-poly-mercedes-amg-gt-r-2ff421e59bf345a281779ec43fe98d34" target="_blank" rel="noopener">“Low Poly Mercedes-AMG GT-R”</a> by kulonee, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a></p>
-      <p class="ver" id="ver">Version 6 Oct 2026 · 16:00 · if this looks old, press Ctrl+Shift+R</p>
+      <p class="ver" id="ver">Version 6 Oct 2026 · 17:00 · if this looks old, press Ctrl+Shift+R</p>
     </div></div>
   </div>
 
@@ -2724,7 +2724,7 @@ function netFrame() {
   }).catch(() => {});
 }
 
-const OWNER_KEY = null;
+const OWNER_KEY = {"v":1,"iter":600000,"salt":"LcL2OfD9tJqRYcIyJPWvHw==","iv":"mr1GF8Ma1dolopxM","locked":"QzWSXHYqMXbq/tjG14AN68fDkspLc7+hqdTCRoDZIsngzFe4lA1oif/94lhIidXSTefj1gZYh92rt6VENI5dz2nb7GOliggQxD+63KrmZMjynOnjMAxCV2avxDpLOYBuyxk8XBQYbx75LltNbsua5UPaNb7wHxzHmEaqnnccUk6pn7UVO9+qVMwhTaxetd/eEc+5q3GoU1k/Rg==","pub":"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE/bK8/SthPQSMY0bbuExqS0SRaTKFm1O7xKzKk8gGxEhURjzGotjzCVmR0/ztkCf++lGAGYY+X04fVv1cLSSyTQ=="};
 const RELAY_URL = '';   // optional: a Worker that hands out TURN relay credentials (needs a paid TURN key)
 const RELAY_WS = 'wss://hookring-relay.scratchie018.workers.dev';    // Cloudflare relay (Workers + Durable Objects, free plan), e.g. wss://hookring-relay.NAME.workers.dev
 /* ---------- owner panel ----------
@@ -3882,11 +3882,21 @@ addEventListener('error', e => admLog('error', `${e.message} @${(e.filename || '
 const FC = { on:false, pos:new THREE.Vector3(), yaw:0, pitch:0, keys:new Set(), speed:8, frozen:false, keysOn:true, path:[], play:null, dur:8, rec:false };
 function fcStart() {
   if (!admLocal()) { admToast('Free camera works offline, in cheats rooms, or with the owner key unlocked'); return; }
-  FC.on = true; FC.pos.copy(camera.position); keys.clear(); mouse.L = mouse.R = false;
-  const e = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ'); FC.yaw = e.y; FC.pitch = e.x;
+  FC.on = true; keys.clear(); mouse.L = mouse.R = false;
+  // start just behind and above yourself, looking at your character
+  const p = player, a = p ? p.ang : 0;
+  if (p && p.alive) { FC.yaw = -a - Math.PI/2; FC.pitch = -.32; FC.pos.set(p.x*S - Math.cos(a)*3.4, (p.jumpY || 0) + 2.6, p.y*S - Math.sin(a)*3.4); }
+  else { FC.pos.copy(camera.position); const e = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ'); FC.yaw = e.y; FC.pitch = e.x; }
+  selfBody(true);
   window.__cam = fcCam; admRender();
 }
-function fcStop() { FC.on = false; FC.play = null; window.__cam = null; FC.keys.clear(); admRender(); }
+function fcStop() { FC.on = false; FC.play = null; window.__cam = null; FC.keys.clear(); selfBody(false); admRender(); }
+// in first person you have no body; give yourself one while the free camera is out (rebuilt when the weapon changes)
+function selfBody(on) {
+  const p = player; if (!p) return;
+  if (p.mesh && (!on || p.mesh.weapon !== p.weapon)) { scene.remove(p.mesh.g); hitMeshes = hitMeshes.filter(m => m.userData.ent !== p); p.mesh = null; }
+  if (on && !p.mesh) { buildFighter(p); p.mesh.weapon = p.weapon; }
+}
 function fcCam(cam) {
   if (FC.play) {
     const p = FC.play, k = Math.min(1, (performance.now() - p.t0)/(FC.dur*1000)), P = FC.path, n = P.length - 1;
@@ -3960,6 +3970,7 @@ const vizSig = () => [RECTS.length, PLATS.length, SPAWNS.length, currentMap.id, 
 const botLines = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color:0xffe14a, depthTest:false })); botLines.renderOrder = 999; scene.add(botLines);
 function admFrame(dt) {
   ADM.fps = ADM.fps*.95 + (1/Math.max(dt, 1e-3))*.05;
+  if (FC.on) selfBody(true);
   const anyViz = Object.values(ADM.viz).some(Boolean);
   if (anyViz && ADM.vizKey !== vizSig()) vizBuild();
   if (!anyViz && ADM.vizGroup) { scene.remove(ADM.vizGroup); ADM.vizGroup = null; ADM.vizKey = ''; for (const m of carHitMeshes) m.visible = false; }
@@ -4184,7 +4195,7 @@ function syncFighters(t) {
       M.g.visible = e.deadT < 2.4;
       continue;
     }
-    M.g.position.set(e.x*S, e.remote ? Math.max(-30, e.jumpY || 0) : 0, e.y*S); M.g.rotation.set(0, -e.ang, 0);
+    M.g.position.set(e.x*S, e.remote || e.isPlayer ? Math.max(-30, e.jumpY || 0) : 0, e.y*S); M.g.rotation.set(0, -e.ang, 0);
     M.g.visible = !(e.prot > 0 && Math.sin(t*30) > 0);
     // seated in a car: sink into the seat; only visible once their door is gone
     if (e.inCar) { M.g.position.y = e.inCar.h - .55; M.g.visible = !shielded(e); }
